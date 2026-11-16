@@ -12,9 +12,9 @@ The goal is to explore local LLMs, full-stack development, and agentic AI system
 - [x] React-based chat interface
 - [x] Python backend with FastAPI
 - [x] Integration with Ollama
-- [ ] Streaming responses
+- [x] Streaming responses
 - [ ] Mobile-friendly interface
-- [ ] Conversation history
+- [x] Conversation history
 - [ ] Tool calling
 - [ ] Agent loop and autonomous tasks
 - [ ] Reminders and task management

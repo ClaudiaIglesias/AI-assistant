@@ -51,6 +51,133 @@ body {
   font-size: 13px;
 }
 
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 24px;
+}
+
+.chat-list h3 {
+  font-size: 14px;
+  margin: 10px 0 8px 4px;
+  color: #999;
+}
+
+.chat-item-row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  gap: 4px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+/* Chat seleccionado */
+.chat-item-row.selected {
+  background: #3a3a3a;
+}
+
+/* Hover sobre cualquier chat */
+.chat-item-row:hover {
+  background: #303030;
+}
+
+/* Botón del nombre */
+.chat-item {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* Botón de los tres puntos */
+.chat-menu-button {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  margin-left: auto;
+  margin-right: 6px;
+  color: inherit;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  opacity: 0;
+}
+
+.chat-item-row:hover .chat-menu-button,
+.chat-item-row.selected .chat-menu-button {
+  opacity: 1;
+}
+
+.chat-menu-button:hover {
+  background: rgba(128, 128, 128, 0.25);
+}
+
+.chat-menu-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.chat-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: #2b2b2b;
+  color: white;
+  border-radius: 8px;
+  min-width: 160px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.chat-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: white;
+  text-align: left;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.chat-menu-option:hover {
+  background: #404040;
+}
+
+.delete-option {
+  color: #ff6666;
+}
+
+.delete-option:hover {
+  background: rgba(255, 85, 85, 0.12);
+}
+
+.chat-menu-option svg {
+  flex-shrink: 0;
+}
+
+.chat-menu small {
+  color: #bbb;
+}
+
 /* ------------ Main page -------------- */
 .chat {
   flex: 1;
@@ -111,7 +238,7 @@ body {
 }
 
 .message p {
-  margin: 6px 0 0;
+  margin: 0;
   white-space: pre-wrap;
 }
 
@@ -168,6 +295,10 @@ body {
   width: 40px;
   font-size: 22px;
   cursor: pointer;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .input-container button:disabled {
