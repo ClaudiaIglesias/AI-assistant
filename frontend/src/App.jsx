@@ -1,7 +1,10 @@
 
 import { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { Pencil, Trash2, Plus } from "lucide-react";
+import ReactMarkdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import './App.css';
 
 const API_URL = "http://localhost:8000";
@@ -493,17 +496,19 @@ function App() {
 
             {messages.map((message, index) => (
               <div key={index} className={`message ${message.role}`} >
-                <ReactMarkdown>
+                {message.role === "assistant" && !message.content && loading ? (
+                  <div className="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                ) : (
+                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
                   {message.content}
                 </ReactMarkdown>
+                )}
               </div>
             ))}
-
-            {loading && (
-              <div className="message assistant">
-                ...
-              </div>
-            )}
 
             {error && (
               <p className="error">{error}</p>

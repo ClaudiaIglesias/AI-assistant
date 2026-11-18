@@ -5,6 +5,10 @@ from zoneinfo import ZoneInfo
 import logging
 import inspect
 from typing import get_type_hints
+import ast
+import operator
+import math
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +26,190 @@ def get_current_time():
         "timezone": "Europe/Madrid"
     }
 
+# -- Calculator
+def evaluate_expression(node):
+    """Safely evaluates a mathematical expression using allowed operations."""
+
+    operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+            raise ValueError("Only numeric values are allowed.")
+
+        return node.value
+
+    if isinstance(node, ast.BinOp):
+        operation = operators.get(type(node.op))
+
+        if operation is None:
+            raise ValueError("This mathematical operation is not allowed.")
+
+        left = evaluate_expression(node.left)
+        right = evaluate_expression(node.right)
+
+        # Prevent excessively large exponent calculations
+        if isinstance(node.op, ast.Pow) and abs(right) > 100:
+            raise ValueError("Exponent is too large.")
+
+        return operation(left, right)
+
+    if isinstance(node, ast.UnaryOp):
+        operation = operators.get(type(node.op))
+
+        if operation is None:
+            raise ValueError("This mathematical operation is not allowed.")
+
+        return operation(evaluate_expression(node.operand))
+
+    raise ValueError("Invalid mathematical expression.")
+
+
+def calculate(expression: str):
+    """
+    Calculadora matemática segura.
+    Admite operaciones básicas, porcentajes, raíces,
+    logaritmos, trigonometría y constantes matemáticas.
+    """
+
+    if not isinstance(expression, str):
+        raise ValueError("La expresión debe ser texto.")
+
+    if len(expression) > 200:
+        raise ValueError("La expresión es demasiado larga.")
+
+    # Convertir porcentajes: 15% -> (15/100)
+    expression = re.sub(
+        r"(?<![\w.])(\d+(?:\.\d+)?)\s*%",
+        r"(\1/100)",
+        expression
+    )
+
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError:
+        raise ValueError("La expresión matemática no es válida.")
+
+    operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    functions = {
+        "sqrt": math.sqrt,
+        "sin": math.sin,
+        "cos": math.cos,
+        "tan": math.tan,
+        "asin": math.asin,
+        "acos": math.acos,
+        "atan": math.atan,
+        "log": math.log10,
+        "log10": math.log10,
+        "log2": math.log2,
+        "ln": math.log,
+        "abs": abs,
+        "round": round,
+        "min": min,
+        "max": max,
+    }
+
+    constants = {
+        "pi": math.pi,
+        "e": math.e,
+    }
+
+    def evaluate(node):
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+
+        elif isinstance(node, ast.Constant):
+            if isinstance(node.value, bool) or not isinstance(
+                node.value, (int, float)
+            ):
+                raise ValueError("Solo se permiten números.")
+
+            return node.value
+
+        elif isinstance(node, ast.BinOp):
+            operation = operators.get(type(node.op))
+
+            if operation is None:
+                raise ValueError("Operador no permitido.")
+
+            left = evaluate(node.left)
+            right = evaluate(node.right)
+
+            if isinstance(node.op, ast.Pow) and abs(right) > 100:
+                raise ValueError("Exponente demasiado grande.")
+
+            return operation(left, right)
+
+        elif isinstance(node, ast.UnaryOp):
+            operation = operators.get(type(node.op))
+
+            if operation is None:
+                raise ValueError("Operador no permitido.")
+
+            return operation(evaluate(node.operand))
+
+        elif isinstance(node, ast.Name):
+            if node.id in constants:
+                return constants[node.id]
+
+            raise ValueError(f"Nombre no permitido: {node.id}")
+
+        elif isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                raise ValueError("Llamada a función no permitida.")
+
+            function = functions.get(node.func.id)
+
+            if function is None:
+                raise ValueError(
+                    f"Función no permitida: {node.func.id}"
+                )
+
+            if node.keywords:
+                raise ValueError("No se permiten argumentos con nombre.")
+
+            arguments = [evaluate(arg) for arg in node.args]
+
+            return function(*arguments)
+
+        else:
+            raise ValueError("Expresión no permitida.")
+
+    # Limitar la complejidad de la expresión
+    if sum(1 for _ in ast.walk(tree)) > 50:
+        raise ValueError("Expresión demasiado compleja.")
+
+    result = evaluate(tree)
+
+    if not isinstance(result, (int, float)) or not math.isfinite(result):
+        raise ValueError("El resultado no es un número válido.")
+
+    return {
+        "expression": expression,
+        "result": result
+    }
+
 
 # ------------ Central registry of available tools -------------
 TOOL_REGISTRY = {
     "get_current_time": get_current_time,
+    "calculate": calculate,
 }
 
 

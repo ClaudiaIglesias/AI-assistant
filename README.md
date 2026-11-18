@@ -17,12 +17,12 @@ The goal is to explore local LLMs, full-stack development, and agentic AI system
 - [x] Edit conversation titles
 - [x] Delete conversations
 - [ ] Tool calling
-      - [x] Date and Time
-      - [ ] Calculator
-      - [ ] Get the weather
-      - [ ] Search in Internet
-      - [ ] Notes and Reminders
-      - [ ] Control the PC
+  - [x] Date and Time
+  - [x] Calculator
+  - [ ] Get the weather
+  - [ ] Search in Internet
+  - [ ] Notes and Reminders
+  - [ ] Control the PC
 - [ ] Agent loop and autonomous tasks
 - [ ] Reminders and task management
 
@@ -83,7 +83,7 @@ FastAPI Backend
 Ollama
       |
       v
-Gemma 3 1B
+Qwen 3.5 2b
 
 FastAPI Backend
       |
@@ -161,6 +161,7 @@ From the project root:
 cd frontend
 npm install
 npm install react-markdown lucide-react
+npm install remark-math rehype-katex katex
 ```
 
 ## Running the Application

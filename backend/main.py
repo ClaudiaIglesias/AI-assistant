@@ -8,7 +8,6 @@ from typing import Literal
 from ollama import chat
 import json
 import logging
-import time
 
 from database import (
     init_db,
