@@ -20,7 +20,7 @@ body {
 .sidebar {
   width: 260px;
   background: #202020;
-  padding: 24px;
+  padding: 24px 10px 24px 10px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0; /* Evita que se encoja cuando la pantalla sea más pequeña */
@@ -28,17 +28,19 @@ body {
 
 .sidebar h2 {
   font-size: 20px;
+  margin-left: 12px;
 }
 
 .new-chat {
   background: transparent;
-  border: 1px solid #444;
-  color: white;
-  padding: 12px;
+  border: none;
+  color: rgb(196, 196, 196);
+  padding: 8px 12px;
   border-radius: 8px;
   cursor: pointer;
   text-align: left;
   margin-top: 24px;
+  font-weight: bold;
 }
 
 .new-chat:hover {
@@ -60,56 +62,106 @@ body {
 
 .chat-list h3 {
   font-size: 14px;
-  margin: 10px 0 8px 4px;
-  color: #999;
+  margin: 10px 0 8px 8px;
+  color: #cacaca;
 }
 
 .chat-item-row {
+  position: relative;
   display: flex;
   align-items: center;
-  position: relative;
-  gap: 4px;
+  width: 100%;
   border-radius: 8px;
-  transition: background 0.15s ease;
+  margin-left: 4px;
+  color: rgb(216, 200, 215);
 }
 
-/* Chat seleccionado */
 .chat-item-row.selected {
   background: #3a3a3a;
+  color: white;
 }
 
-/* Hover sobre cualquier chat */
 .chat-item-row:hover {
   background: #303030;
 }
 
+/* Capa que tapa progresivamente el texto */
+.chat-item-row::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 65px;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(
+    to right,
+    transparent,
+    #202020 90%
+  );
+}
+
+.chat-item-row:hover::after,
+.chat-item-row.selected::after {
+  width: 80px;
+  opacity: 1;
+}
+
+.chat-item-row:hover::after {
+  background: linear-gradient(to right, transparent, #303030 60%);
+}
+
+.chat-item-row.selected::after {
+  background: linear-gradient(to right, transparent, #3a3a3a 60%);
+}
+
 /* Botón del nombre */
 .chat-item {
-  flex: 1;
+  display: block;
+  width: 100%;
   min-width: 0;
+  flex: 1;
   background: transparent;
   border: none;
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 6px 10px;
   text-align: left;
   color: inherit;
   cursor: pointer;
   font-size: 14px;
+
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+
+.chat-item-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 9px;
+  background: #303030;
+  border: 1px solid #777;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  outline: none;
 }
 
 /* Botón de los tres puntos */
 .chat-menu-button {
-  background: transparent;
+  background: inherit;
   border: none;
   border-radius: 6px;
-  padding: 4px 10px;
-  margin-left: auto;
-  margin-right: 6px;
-  color: inherit;
+  padding: 1px 4px;
+  color: white;
   cursor: pointer;
-  font-size: 20px;
+  font-size: 18px;
+  margin-right: 2px;
   line-height: 1;
   opacity: 0;
+  z-index: 4;
 }
 
 .chat-item-row:hover .chat-menu-button,
@@ -118,13 +170,17 @@ body {
 }
 
 .chat-menu-button:hover {
-  background: rgba(128, 128, 128, 0.25);
+  background: #464646;
 }
 
 .chat-menu-container {
-  position: relative;
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
+  z-index: 3;
 }
 
 .chat-menu {
@@ -177,6 +233,77 @@ body {
 .chat-menu small {
   color: #bbb;
 }
+
+
+/* ------------ Delete confirmation modal ------------ */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.delete-modal {
+  width: 100%;
+  max-width: 400px;
+  padding: 18px 24px;
+  background: #252525;
+  border: none;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+
+.delete-modal h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: white;
+  font-weight: normal;
+}
+
+.delete-modal p {
+  margin: 0;
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.modal-buttons button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cancel-button {
+  background: #4b4b4b;
+  color: white;
+}
+
+.cancel-button:hover {
+  background: #4a4a4a;
+}
+
+.confirm-delete-button {
+  background: #c53e3e;
+  color: white;
+}
+
+.confirm-delete-button:hover {
+  background: #b12f2f;
+}
+
 
 /* ------------ Main page -------------- */
 .chat {

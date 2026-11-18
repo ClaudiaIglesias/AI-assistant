@@ -1,33 +1,45 @@
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 from typing import Literal
 from ollama import chat
 import json
 import logging
+import time
 
-# Import database functions
 from database import (
     init_db,
     create_conversation,
     save_message,
     get_conversations,
     update_conversation_title,
-    get_messages
+    get_messages,
+    delete_conversation
 )
+from tools import get_available_tools, execute_tool
 
 
 # --- LLM ---
 
-MODEL = "gemma3:1b"
+MODEL = "qwen3.5:2b"
 
 SYSTEM_PROMPT = """
 You are a helpful AI assistant.
-Always answer in Spanish unless the user asks otherwise.
+Always respond in the same language as the user's latest message.
 Be clear, friendly and honest.
 Never invent information.
+
+When a tool returns a result containing an "error" field:
+- Never pretend the tool succeeded.
+- Do not invent the missing information.
+- Explain the problem to the user clearly.
+- If possible, answer the rest of the request without that tool.
+
+When a tool provides date or time information, use its values exactly.
+Never guess or recalculate information already provided by a tool.
 """
 
 logger = logging.getLogger(__name__)
@@ -53,11 +65,12 @@ class Message(BaseModel):
     role: Literal["user", "assistant"]
     content: str
 
-
 class ChatRequest(BaseModel):
     conversation_id: int
     messages: list[Message]
 
+class RenameConversationRequest(BaseModel):
+    title: str
 
 # --- ENDPOINTS ---
 
@@ -108,12 +121,8 @@ def chat_endpoint(request: ChatRequest):
         None
     )
 
-    # Generate a title for the first message
+    # If it's the first message, we will generate a title
     is_first_message = sum(1 for message in request.messages if message.role == "user") == 1
-
-    if is_first_message and latest_user_message is not None:
-        title = generate_conversation_title(latest_user_message.content)
-        update_conversation_title(request.conversation_id, title)
 
 
     # Save the message in the DB
@@ -127,57 +136,123 @@ def chat_endpoint(request: ChatRequest):
     # Generate and stream the response
     def generate_response():
         try:
-            response = chat(
-                model=MODEL,
-                messages=conversation,
-                options={"temperature": 0.2},
-                stream=True
-            )
-
+            max_tool_rounds = 5
             assistant_response = ""
+            execution_context = {"count": 0, "seen": set()}
 
-            for chunk in response:
-                content = chunk.message.content
+            for round_number in range(max_tool_rounds + 1):
+                response_stream = chat(
+                    model=MODEL,
+                    messages=conversation,
+                    tools=get_available_tools(),
+                    options={"temperature": 0.2},
+                    think=False,
+                    stream=True
+                )
 
-                assistant_response += content
+                round_content = ""
+                tool_calls = []
 
-                data = {
-                    "type": "chunk",
-                    "content": content
-                }
+                for chunk in response_stream:
+                    message = chunk.message
 
-                yield json.dumps(data, ensure_ascii=False) + "\n"
+                    # Acumular los fragmentos de texto
+                    if message.content:
+                        round_content += message.content
+                        yield json.dumps({"type": "chunk", "content": message.content}, ensure_ascii=False) + "\n"
 
-            # Save the complete assistant response
+                    # Acumular las solicitudes de herramientas
+                    if message.tool_calls:
+                        tool_calls.extend(message.tool_calls)
+
+                assistant_response += round_content
+
+                # Si no hay herramientas, hemos terminado
+                if not tool_calls:
+                    break
+
+                if round_number == max_tool_rounds:
+                    raise RuntimeError("Maximum number of tool calls exceeded.")
+
+                # Guardar el mensaje del asistente que contiene las llamadas
+                conversation.append({
+                    "role": "assistant",
+                    "content": round_content,
+                    "tool_calls": tool_calls
+                })
+
+                # Ejecutar las herramientas solicitadas
+                for tool_call in tool_calls:
+                    tool_result = execute_tool(tool_call, execution_context)
+
+                    conversation.append({
+                        "role": "tool",
+                        "name": tool_call.function.name,
+                        "content": tool_result
+                    })
+
+            else:
+                raise RuntimeError("Maximum number of tool calls exceeded.")
+
+            # Guardar la respuesta completa en la base de datos
             if assistant_response:
                 save_message(
                     request.conversation_id,
                     "assistant",
                     assistant_response
                 )
-
-            # Tell the frontend that generation is complete
             yield json.dumps({"type": "done"}) + "\n"
 
         except Exception:
             logger.exception("Error while generating the response")
 
-            data = {
-                "type": "error",
-                "content": "Ha ocurrido un error al generar la respuesta."
-            }
+            yield json.dumps({"type": "error", "content": "Ha ocurrido un error al generar la respuesta."}, ensure_ascii=False) + "\n"
 
-            yield json.dumps(data, ensure_ascii=False) + "\n"
+    background_task = None
+
+    # Generate title is its the first message
+    if is_first_message:
+        background_task = BackgroundTask(
+            generate_and_save_title,
+            request.conversation_id,
+            latest_user_message.content
+        )
+
+    return StreamingResponse( generate_response(), media_type="application/x-ndjson", background=background_task)
 
 
-    return StreamingResponse(
-        generate_response(),
-        media_type="application/x-ndjson"
-    )
+@app.put("/conversations/{conversation_id}/title")
+def rename_conversation(conversation_id: int, request: RenameConversationRequest):
+    new_title = request.title.strip()
+
+    if not new_title:
+        raise HTTPException(status_code=400, detail="Conversation title cannot be empty.")
+
+    conversations = get_conversations()
+
+    if not any(c["id"] == conversation_id for c in conversations):
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
+    update_conversation_title(conversation_id, new_title)
+
+    return {
+        "success": True,
+        "title": new_title
+    }
 
 
-# --------- Helpers ------
+@app.delete("/conversations/{conversation_id}")
+def remove_conversation(conversation_id: int):
+    conversations = get_conversations()
 
+    if not any(c["id"] == conversation_id for c in conversations):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    delete_conversation(conversation_id)
+
+    return {"success": True}
+
+# --------- Helpers ---------
 def generate_conversation_title(user_message: str) -> str:
     response = chat(
         model=MODEL,
@@ -186,7 +261,7 @@ def generate_conversation_title(user_message: str) -> str:
                 "role": "system",
                 "content": (
                     "Generate a very short title for a conversation. "
-                    "Use 3 to 6 words, in Spanish. "
+                    "Use 3 to 6 words, in the same language as the user. "
                     "Describe the main topic of the conversation. "
                     "Return only the title, without quotes or explanations."
                 )
@@ -196,7 +271,8 @@ def generate_conversation_title(user_message: str) -> str:
                 "content": user_message
             }
         ],
-        options={"temperature": 0.2},
+        options={"temperature": 0.2, "num_predict": 30},
+        think=False,
         stream=False
     )
 
@@ -209,3 +285,13 @@ def generate_conversation_title(user_message: str) -> str:
     title = title.strip('"\'`')
 
     return title[:60] if title else "New conversation"
+
+def generate_and_save_title(conversation_id: int, user_message: str):
+    """Generates and saves a conversation title in the background."""
+
+    try:
+        title = generate_conversation_title(user_message)
+        update_conversation_title(conversation_id, title)
+
+    except Exception:
+        logger.exception("Error while generating conversation title")

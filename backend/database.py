@@ -96,25 +96,6 @@ def get_conversations():
         connection.close()
 
 
-def update_conversation_title(conversation_id: int, title: str):
-    connection = get_db_connection()
-
-    try:
-        connection.execute(
-            """
-            UPDATE conversations
-            SET title = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (title, conversation_id)
-        )
-
-        connection.commit()
-
-    finally:
-        connection.close()
-
-
 def get_messages(conversation_id: int):
     connection = get_db_connection()
 
@@ -130,6 +111,43 @@ def get_messages(conversation_id: int):
         )
 
         return [dict(row) for row in cursor.fetchall()]
+
+    finally:
+        connection.close()
+
+
+def update_conversation_title(conversation_id: int, title: str):
+    connection = get_db_connection()
+
+    try:
+        connection.execute(
+            """
+            UPDATE conversations
+            SET title = ?
+            WHERE id = ?
+            """,
+            (title, conversation_id)
+        )
+
+        connection.commit()
+
+    finally:
+        connection.close()
+
+
+def delete_conversation(conversation_id: int):
+    connection = get_db_connection()
+
+    try:
+        connection.execute(
+            """
+            DELETE FROM conversations
+            WHERE id = ?
+            """,
+            (conversation_id,)
+        )
+
+        connection.commit()
 
     finally:
         connection.close()

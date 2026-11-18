@@ -1,8 +1,10 @@
 
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Trash2, Plus } from "lucide-react";
 import './App.css';
+
+const API_URL = "http://localhost:8000";
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -12,10 +14,13 @@ function App() {
   const [conversationId, setConversationId] = useState(null);
   const [conversations, setConversations] = useState([]);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [editingConversationId, setEditingConversationId] = useState(null);
+  const [editingTitle, setEditingTitle] = useState("");
+  const [originalTitle, setOriginalTitle] = useState("");
+  const [deleteConfirmationId, setDeleteConfirmationId] = useState(null);
 
   const inputRef = useRef(null); // To re-activate it after sending a mesage
   const messagesEndRef = useRef(null); // To be able to autoscroll
-  const chatMenuRef = useRef(null); // The chat options menu
 
   // Autoscroll
   useEffect(() => { 
@@ -32,11 +37,17 @@ function App() {
   // Clicking outside the options menu closes it
   useEffect(() => {
     function handleClickOutside(event) {
-      if (
-        chatMenuRef.current &&
-        !chatMenuRef.current.contains(event.target)
-      ) {
+      // Close the chat options menu
+      if (!event.target.closest(".chat-menu-container")) {
         setOpenMenuId(null);
+      }
+
+      // Save the title when clicking outside the input
+      if (
+        editingConversationId !== null &&
+        !event.target.closest(".chat-item-input")
+      ) {
+        saveTitle();
       }
     }
 
@@ -45,13 +56,13 @@ function App() {
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, []);
+  }, [editingConversationId, editingTitle]);
 
   // Loads the list of recent chats
   async function loadConversations() {
     try {
       const response = await fetch(
-        "http://localhost:8000/conversations"
+        `${API_URL}/conversations`
       );
 
       if (!response.ok) {
@@ -71,7 +82,7 @@ function App() {
   async function loadConversation(conversation) {
     try {
       const response = await fetch(
-        `http://localhost:8000/conversations/${conversation.id}/messages`
+        `${API_URL}/conversations/${conversation.id}/messages`
       );
 
       if (!response.ok) {
@@ -100,6 +111,37 @@ function App() {
     }
   }
 
+
+  // Wait until the conversation title has been generated
+  async function waitForConversationTitle(conversationId) {
+    const maxAttempts = 30;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      try {
+        const response = await fetch(`${API_URL}/conversations`);
+
+        if (!response.ok) continue;
+
+        const data = await response.json();
+
+        setConversations(data.conversations);
+
+        const conversation = data.conversations.find(
+          item => item.id === conversationId
+        );
+
+        if (conversation && conversation.title !== "New Conversation") {
+          return;
+        }
+      } catch (err) {
+        console.error("Error checking conversation title:", err);
+      }
+    }
+  }
+
+
   // Create a new chat
   function newChat() {
     // No conversation exists in the database yet
@@ -115,6 +157,93 @@ function App() {
     inputRef.current?.focus();
   }
 
+  // Delete a chat
+  async function deleteConversation(id) {
+    try {
+      const response = await fetch(
+        `${API_URL}/conversations/${id}`,
+        {
+          method: "DELETE"
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Could not delete conversation.");
+      }
+
+      // Remove the conversation from the sidebar
+      setConversations(current =>
+        current.filter(conversation => conversation.id !== id)
+      );
+
+      // If the deleted conversation was open, return to a new chat
+      if (conversationId === id) {
+        newChat();
+      }
+
+    } catch (err) {
+      console.error("Error deleting conversation:", err);
+      setError("Could not delete conversation.");
+    }
+  }
+
+  // Start renaming a chat
+  function startEditing(conversation) {
+    setOpenMenuId(null);
+    setEditingConversationId(conversation.id);
+    setEditingTitle(conversation.title);
+    setOriginalTitle(conversation.title);
+  }
+
+  // Cancel chat renaming and go back to previous title
+  function cancelEditing() {
+    setEditingTitle(originalTitle);
+    setEditingConversationId(null);
+  }
+
+  // Change a chat's title
+  async function saveTitle() {
+    const newTitle = editingTitle.trim();
+
+    if (!newTitle) {
+      cancelEditing();
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_URL}/conversations/${editingConversationId}/title`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            title: newTitle
+          })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Could not rename conversation.");
+      }
+
+      // Update the title in the frontend
+      setConversations(currentConversations =>
+        currentConversations.map(conversation =>
+          conversation.id === editingConversationId
+            ? { ...conversation, title: newTitle }
+            : conversation
+        )
+      );
+
+      setEditingConversationId(null);
+
+    } catch (err) {
+      console.error("Error renaming conversation:", err);
+      setError("Could not rename conversation.");
+    }
+  }
 
   // Sends a new message to the current conversation
   async function sendMessage() {
@@ -142,7 +271,7 @@ function App() {
 
       if (activeConversationId === null) {
         const conversationResponse = await fetch(
-          "http://localhost:8000/conversations",
+          `${API_URL}/conversations`,
           {
             method: "POST"
           }
@@ -160,7 +289,7 @@ function App() {
 
       // Send the conversation to our Python API
       const response = await fetch(
-        "http://localhost:8000/chat",
+        `${API_URL}/chat`,
         {
           method: "POST",
           headers: {
@@ -251,6 +380,11 @@ function App() {
       // Reload chat history to add this new one
       await loadConversations();
 
+      // Wait for the generated title if this is a new conversation
+      if (updatedMessages.filter(message => message.role === "user").length === 1) {
+        await waitForConversationTitle(activeConversationId);
+      }
+
     } catch (err) {
       console.error(err);
       setError("Could not connect to the AI assistant.");
@@ -268,7 +402,8 @@ function App() {
         <h2>AI Assistant</h2>
 
         <button className="new-chat" onClick={newChat} disabled={loading} >
-          + New chat
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          New chat
         </button>
 
         <div className="chat-list">
@@ -278,17 +413,33 @@ function App() {
             <div key={conversation.id} className={`chat-item-row ${
                 conversationId === conversation.id ? "selected" : ""
               }`}>
-              <button className="chat-item" type="button"
-                onClick={() => {
-                  setOpenMenuId(null);
-                  loadConversation(conversation);
-                }}
-                disabled={loading}
-              >
-                {conversation.title}
-              </button>
+              {editingConversationId === conversation.id ? (
+                <input className="chat-item-input" type="text" value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      saveTitle();
+                    }
 
-              <div className="chat-menu-container" ref={chatMenuRef}>
+                    if (e.key === "Escape") {
+                      cancelEditing();
+                    }
+                  }}
+                  autoFocus
+                />
+              ) : (
+                <button className="chat-item" type="button"
+                  onClick={() => {
+                    setOpenMenuId(null);
+                    loadConversation(conversation);
+                  }}
+                  disabled={loading}
+                >
+                  {conversation.title}
+                </button>
+              )}
+
+              <div className="chat-menu-container">
                 <button
                   className="chat-menu-button"
                   type="button"
@@ -304,18 +455,14 @@ function App() {
 
                 {openMenuId === conversation.id && (
                   <div className="chat-menu">
-                    <button className="chat-menu-option" type="button"
-                      onClick={() => {
-                        setOpenMenuId(null);
-                        console.log("Editar chat:", conversation.id);
-                      }} >
+                    <button className="chat-menu-option" type="button" onClick={() => startEditing(conversation)} >
                       <Pencil size={12} /> Rename
                     </button>
 
                     <button className="chat-menu-option delete-option" type="button"
                       onClick={() => {
                         setOpenMenuId(null);
-                        console.log("Eliminar chat:", conversation.id);
+                        setDeleteConfirmationId(conversation.id);
                       }} >
                       <Trash2 size={12} /> Delete
                     </button>
@@ -400,6 +547,37 @@ function App() {
             </button>
           </div>
         </footer>
+
+        {deleteConfirmationId !== null && (
+          <div className="modal-overlay">
+            <div className="delete-modal">
+              <h2>Delete chat?</h2>
+
+              <p>
+                Are you sure you want to delete this chat?
+              </p>
+
+              <div className="modal-buttons">
+                <button
+                  className="cancel-button"
+                  onClick={() => setDeleteConfirmationId(null)}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  className="confirm-delete-button"
+                  onClick={() => {
+                    deleteConversation(deleteConfirmationId);
+                    setDeleteConfirmationId(null);
+                  }}
+                >
+                  Delete chat
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
