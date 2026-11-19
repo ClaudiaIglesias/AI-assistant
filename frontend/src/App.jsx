@@ -9,6 +9,7 @@ import './App.css';
 
 const API_URL = "http://localhost:8000";
 
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -300,7 +301,7 @@ function App() {
           },
           body: JSON.stringify({
             conversation_id: activeConversationId,
-            messages: updatedMessages
+            message: text
           })
         }
       );
@@ -405,7 +406,7 @@ function App() {
         <h2>AI Assistant</h2>
 
         <button className="new-chat" onClick={newChat} disabled={loading} >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          <svg width="18" height="18" viewBox="0 1 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
           New chat
         </button>
 
@@ -536,16 +537,7 @@ function App() {
             />
 
             <button onClick={sendMessage} disabled={loading || !input.trim()} >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 21V7" />
                 <path d="M5 12l7-7 7 7" />
               </svg>

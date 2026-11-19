@@ -19,7 +19,7 @@ The goal is to explore local LLMs, full-stack development, and agentic AI system
 - [ ] Tool calling
   - [x] Date and Time
   - [x] Calculator
-  - [ ] Get the weather
+  - [x] Get the weather
   - [ ] Search in Internet
   - [ ] Notes and Reminders
   - [ ] Control the PC
@@ -127,7 +127,7 @@ ollama --version
 ### 3. Download the language model
 
 ```powershell
-ollama pull qwen3.5:2b
+ollama pull qwen3.5:4b
 ```
 
 Verify that the model is available:
@@ -150,7 +150,7 @@ python -m venv .venv
 Install the backend dependencies:
 
 ```powershell
-pip install fastapi uvicorn ollama
+pip install fastapi uvicorn ollama requests
 ```
 
 ### 5. Set up the React frontend

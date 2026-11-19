@@ -19,27 +19,32 @@ body {
 /* ------------ Sidebar -------------- */
 .sidebar {
   width: 260px;
-  background: #202020;
-  padding: 24px 10px 24px 10px;
+  background: #131212;
+  padding: 8px 10px 16px 8px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0; /* Evita que se encoja cuando la pantalla sea más pequeña */
 }
 
 .sidebar h2 {
-  font-size: 20px;
+  font-size: 18px;
   margin-left: 12px;
 }
 
 .new-chat {
   background: transparent;
+  color: rgb(219, 219, 219);
+
   border: none;
-  color: rgb(196, 196, 196);
-  padding: 8px 12px;
   border-radius: 8px;
-  cursor: pointer;
+
+  display: flex;
+  align-items: center;
   text-align: left;
+  gap: 8px;
+  padding: 8px 10px;
   margin-top: 24px;
+  cursor: pointer;
   font-weight: bold;
 }
 
@@ -50,6 +55,7 @@ body {
 .sidebar-footer {
   margin-top: auto;
   color: #888;
+  margin-left: 12px;
   font-size: 13px;
 }
 
@@ -73,17 +79,17 @@ body {
   width: 100%;
   border-radius: 8px;
   margin-left: 4px;
-  color: rgb(216, 200, 215);
-}
-
-.chat-item-row.selected {
-  background: #3a3a3a;
-  color: white;
+  color: rgb(168, 168, 168);
 }
 
 .chat-item-row:hover {
-  background: #303030;
+  background: #222222;
 }
+.chat-item-row.selected {
+  background: #2e2e2e;
+  color: white;
+}
+
 
 /* Capa que tapa progresivamente el texto */
 .chat-item-row::after {
@@ -95,10 +101,11 @@ body {
   height: 100%;
   pointer-events: none;
   z-index: 1;
+  border-radius: 8px;
   background: linear-gradient(
     to right,
     transparent,
-    #202020 90%
+    #131212 90%
   );
 }
 
@@ -109,11 +116,11 @@ body {
 }
 
 .chat-item-row:hover::after {
-  background: linear-gradient(to right, transparent, #303030 60%);
+  background: linear-gradient(to right, transparent, #222222 60%);
 }
 
 .chat-item-row.selected::after {
-  background: linear-gradient(to right, transparent, #3a3a3a 60%);
+  background: linear-gradient(to right, transparent, #2e2e2e 60%);
 }
 
 /* Botón del nombre */
@@ -125,11 +132,11 @@ body {
   background: transparent;
   border: none;
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 8px 10px;
   text-align: left;
   color: inherit;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
 
   white-space: nowrap;
   overflow: hidden;
@@ -316,6 +323,7 @@ body {
 .messages-content {
   width: 100%;
   max-width: 750px;
+  font-size: 14px;
 
   display: flex;
   flex-direction: column;
@@ -436,8 +444,8 @@ body {
   display: flex;
   gap: 10px;
   background: #262626;
-  border: 1px solid #444;
-  padding: 10px;
+  border: none;
+  padding: 6px 10px;
   border-radius: 14px;
 }
 
@@ -453,10 +461,10 @@ body {
 
 .input-container button {
   color: #ffffff;
-  background: #9d7cb1;
+  background: transparent;
   border: none;
-  border-radius: 8px;
-  width: 40px;
+  border-radius: 12px;
+  margin-bottom: 2px;
   font-size: 22px;
   cursor: pointer;
 
@@ -467,11 +475,11 @@ body {
 
 .input-container button:disabled {
   color: #aaaaaa;
-  background: #5a4568;
+  background: transparent;
 }
 
 .input-container button:hover:not(:disabled) {
-  background: #b596c7;
+  background: #3b3b3b;
 }
 
 .input-area p {

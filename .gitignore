@@ -22,6 +22,10 @@ Thumbs.db
 # Logs
 *.log
 
-# Databse
+# Scripts de arranque
+start.ps1
+stop.ps1
+
+# Backend
 notas.txt
 *.db

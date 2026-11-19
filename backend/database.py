@@ -62,6 +62,21 @@ def create_conversation():
         connection.close()
 
 
+def conversation_exists(conversation_id: int) -> bool:
+    connection = get_db_connection()
+
+    try:
+        cursor = connection.execute(
+            "SELECT 1 FROM conversations WHERE id = ?",
+            (conversation_id,)
+        )
+
+        return cursor.fetchone() is not None
+
+    finally:
+        connection.close()
+
+
 def save_message(conversation_id: int, role: str, content: str):
     connection = get_db_connection()
 
@@ -72,6 +87,16 @@ def save_message(conversation_id: int, role: str, content: str):
             VALUES (?, ?, ?)
             """,
             (conversation_id, role, content)
+        )
+
+        # Update modification date of the chat
+        connection.execute(
+            """
+            UPDATE conversations
+            SET updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (conversation_id,)
         )
 
         connection.commit()
