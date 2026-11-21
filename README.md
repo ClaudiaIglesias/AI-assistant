@@ -20,7 +20,9 @@ The goal is to explore local LLMs, full-stack development, and agentic AI system
   - [x] Date and Time
   - [x] Calculator
   - [x] Get the weather
-  - [ ] Search in Internet
+  - [x] Search in Internet
+  - [x] List files inside a directory
+  - [x] Read files in your PC
   - [ ] Notes and Reminders
   - [ ] Control the PC
 - [ ] Agent loop and autonomous tasks
@@ -127,7 +129,7 @@ ollama --version
 ### 3. Download the language model
 
 ```powershell
-ollama pull qwen3.5:4b
+ollama pull qwen3.5:9b
 ```
 
 Verify that the model is available:

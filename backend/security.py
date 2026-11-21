@@ -1,11 +1,13 @@
-
 import json
 import logging
-from typing import Any
 import math
 import inspect
-from typing import get_type_hints
+import os
+import stat
 import ipaddress
+
+from pathlib import Path
+from typing import Any, get_type_hints
 from urllib.parse import urlsplit
 
 
@@ -13,17 +15,70 @@ logger = logging.getLogger(__name__)
 
 
 # --------- TOOL SECURITY LIMITS ----------
-
+MAX_TOOL_EXECUTIONS = 5
+# Maximum serialized size of tool results
+MAX_RESULT_SIZE = 50_000
 # Maximum serialized size of tool arguments
 MAX_ARGUMENT_SIZE = 8_000
 # Maximum nesting depth of argument structures
 MAX_ARGUMENT_DEPTH = 10
 # Maximum number of elements in an argument structure
 MAX_ARGUMENT_ITEMS = 200
+
 # Maximum length of external content
 MAX_UNTRUSTED_CONTENT_CHARS = 12_000
 # Maximum length of the source identifier
 MAX_SOURCE_LENGTH = 200
+
+
+# -- WebSearch
+MAX_SEARCH_RESULT_URL_LENGTH = 2_000
+
+
+# -- Filesystem
+MAX_DIRECTORY_ENTRIES = 200
+MAX_PATH_LENGTH = 1_000
+
+WINDOWS_ATTRIBUTE_HIDDEN = 0x2
+WINDOWS_ATTRIBUTE_SYSTEM = 0x4
+WINDOWS_ATTRIBUTE_REPARSE_POINT = 0x400
+
+# Directories that should not be listed.
+BLOCKED_DIRECTORY_NAMES = {
+    "$recycle.bin",
+    "system volume information",
+    "config.msi",
+    "windows",
+    "programdata",
+}
+
+# Hidden and sensitive directories.
+BLOCKED_HIDDEN_DIRECTORIES = {
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".azure",
+    ".config",
+}
+
+# Files and extensions that should not be listed.
+BLOCKED_FILE_NAMES = {
+    ".env",
+    ".env.local",
+    ".env.development",
+    ".env.production",
+    "id_rsa",
+    "id_ed25519",
+    "credentials",
+}
+
+BLOCKED_FILE_EXTENSIONS = {
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+}
+
 
 
 # ------------ CONTENT CONVERSION HELPERS -------------
@@ -221,10 +276,7 @@ def validate_tool_arguments(tool_function, arguments):
             raise ValueError(f"Invalid type for argument: {name}")
 
 # ------------ Web Search Security -------------
-
-MAX_SEARCH_RESULT_URL_LENGTH = 2_000
-
-def _is_safe_search_result_url(url: str) -> bool:
+def is_safe_search_result_url(url: str) -> bool:
     """
     Checks whether a search result URL is safe to return.
 
@@ -281,3 +333,118 @@ def _is_safe_search_result_url(url: str) -> bool:
 
     except (ValueError, UnicodeError):
         return False
+
+
+# ----------- Filesystem Security -------------
+def is_blocked_directory_name(name: str) -> bool:
+    """
+    Checks whether a directory name is restricted.
+    """
+
+    if not isinstance(name, str):
+        return True
+
+    lower_name = name.lower()
+
+    return (
+        lower_name in BLOCKED_DIRECTORY_NAMES
+        or lower_name in BLOCKED_HIDDEN_DIRECTORIES
+    )
+
+
+def is_blocked_file_name(name: str) -> bool:
+    """
+    Checks whether a file name or extension is restricted.
+    """
+
+    if not isinstance(name, str):
+        return True
+
+    lower_name = name.lower()
+
+    return (
+        lower_name.startswith(".")
+        or lower_name in BLOCKED_FILE_NAMES
+        or lower_name.endswith(".env")
+        or Path(lower_name).suffix in BLOCKED_FILE_EXTENSIONS
+    )
+
+
+def is_hidden_or_system_entry(entry_stat) -> bool:
+    """
+    Checks Windows hidden and system attributes.
+    """
+
+    attributes = getattr(entry_stat, "st_file_attributes", 0)
+
+    return bool(attributes & (WINDOWS_ATTRIBUTE_HIDDEN | WINDOWS_ATTRIBUTE_SYSTEM))
+
+
+def is_restricted_filesystem_entry(entry_stat) -> bool:
+    """
+    Rejects symbolic links and Windows reparse points.
+    """
+
+    if stat.S_ISLNK(entry_stat.st_mode):
+        return True
+
+    attributes = getattr(entry_stat, "st_file_attributes", 0)
+
+    return bool(attributes & WINDOWS_ATTRIBUTE_REPARSE_POINT)
+
+
+def validate_directory_path(path: str) -> Path:
+    """
+    Validates a directory path before filesystem listing.
+
+    Rejects restricted directory names, symbolic links,
+    and Windows reparse points.
+
+    This validation does not eliminate filesystem race conditions.
+    """
+
+    if not isinstance(path, str):
+        raise ValueError("Path must be a string.")
+
+    path = path.strip()
+
+    if not path:
+        raise ValueError("A directory path must be specified.")
+
+    if len(path) > MAX_PATH_LENGTH:
+        raise ValueError("Path is too long.")
+
+    directory = Path(path).expanduser()
+
+    if not directory.is_absolute():
+        directory = Path.cwd() / directory
+
+    directory = Path(os.path.abspath(directory))
+
+    if not directory.anchor:
+        raise ValueError("Invalid directory path.")
+
+    current = Path(directory.anchor)
+
+    for part in directory.parts[1:]:
+
+        if is_blocked_directory_name(part):
+            raise PermissionError("Access to this directory is restricted.")
+
+        current = current / part
+
+        entry_stat = os.lstat(current)
+
+        if is_restricted_filesystem_entry(entry_stat):
+            raise PermissionError("Links and reparse points are not allowed.")
+
+        if is_hidden_or_system_entry(entry_stat):
+            raise PermissionError("Hidden and system directories are not allowed.")
+
+        if not stat.S_ISDIR(entry_stat.st_mode):
+            raise NotADirectoryError("The specified path is not a directory.")
+
+    if not directory.is_dir():
+        raise NotADirectoryError("The specified path is not a directory.")
+
+    return directory

@@ -1,56 +1,83 @@
 import json
-from datetime import datetime
-from zoneinfo import ZoneInfo
 import logging
 import ast
 import operator
 import math
 import re
 import requests
+import os
+import stat
+from pathlib import Path
 
-from security import validate_tool_arguments, format_untrusted_content, _is_safe_search_result_url
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from security import (
+    MAX_TOOL_EXECUTIONS, MAX_RESULT_SIZE, MAX_ARGUMENT_SIZE, MAX_DIRECTORY_ENTRIES,
+    validate_tool_arguments, format_untrusted_content, is_safe_search_result_url,
+    validate_directory_path, is_blocked_directory_name, is_blocked_file_name, is_restricted_filesystem_entry, is_hidden_or_system_entry,
+)
 
 
 logger = logging.getLogger(__name__)
 
+# ---------- LIMITS -------------
 
-# --------- TOOL SECURITY LIMITS ----------
+# -- Web Search
+SEARXNG_URL = "http://127.0.0.1:8080/search"
 
-MAX_TOOL_EXECUTIONS = 5
-# Maximum serialized size of tool results
-MAX_RESULT_SIZE = 16_000
+MAX_SEARCH_QUERY_LENGTH = 300
+MAX_SEARCH_RESULTS = 5
+MAX_SEARCH_RESPONSE_BYTES = 1_000_000
+MAX_SEARCH_RESULT_TITLE_LENGTH = 300
+MAX_SEARCH_RESULT_CONTENT_LENGTH = 1_200
 
+# -- Read files
+MAX_READ_FILE_SIZE = 1_000_000  # 1 MB
+MAX_READ_FILE_CHARS = 32_000
+MAX_READ_FILE_PATH_LENGTH = 1_000
+
+ALLOWED_READ_FILE_EXTENSIONS = {".py", ".md"}
 
 
 # ---------- TOOLS -------------
 # -- Time
-def get_current_time():
-    """Returns the current date and time in Madrid."""
+def get_current_time(timezone: str = "Europe/Madrid"):
+    """Returns the current date and time in the requested timezone."""
 
-    now = datetime.now(ZoneInfo("Europe/Madrid"))
+    timezone = timezone.strip() if timezone else "Europe/Madrid"
+
+    try:
+        tz = ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        return {"error": f"Unknown or invalid timezone: {timezone}", "default_timezone": "Europe/Madrid"}
+
+    now = datetime.now(tz)
 
     return {
         "date": now.strftime("%Y-%m-%d"),
         "time": now.strftime("%H:%M:%S"),
         "day": now.strftime("%A"),
-        "timezone": "Europe/Madrid"
+        "timezone": tz.key
     }
 
 # -- Calculator
 def calculate(expression: str):
     """
-    Calculadora matemática segura.
-    Admite operaciones básicas, porcentajes, raíces,
-    logaritmos, trigonometría y constantes matemáticas.
+    Evaluates mathematical expressions using a restricted AST.
+
+    Supports basic arithmetic, percentages, powers,
+    roots, logarithms, trigonometric functions, and constants.
     """
 
     if not isinstance(expression, str):
-        raise ValueError("La expresión debe ser texto.")
+        raise ValueError("Expression must be a string.")
 
     if len(expression) > 200:
-        raise ValueError("La expresión es demasiado larga.")
+        raise ValueError("Expression is too long.")
 
-    # Convertir porcentajes: 15% -> (15/100)
+
+    # Convert percentages: 15% -> (15/100)
     expression = re.sub(
         r"(?<![\w.])(\d+(?:\.\d+)?)\s*%",
         r"(\1/100)",
@@ -60,7 +87,7 @@ def calculate(expression: str):
     try:
         tree = ast.parse(expression, mode="eval")
     except SyntaxError:
-        raise ValueError("La expresión matemática no es válida.")
+        raise ValueError("Invalid mathematical expression.")
 
     operators = {
         ast.Add: operator.add,
@@ -100,10 +127,8 @@ def calculate(expression: str):
             return evaluate(node.body)
 
         elif isinstance(node, ast.Constant):
-            if isinstance(node.value, bool) or not isinstance(
-                node.value, (int, float)
-            ):
-                raise ValueError("Solo se permiten números.")
+            if isinstance(node.value, bool) or not isinstance( node.value, (int, float)):
+                raise ValueError("Only numeric constants are allowed.")
 
             return node.value
 
@@ -111,21 +136,24 @@ def calculate(expression: str):
             operation = operators.get(type(node.op))
 
             if operation is None:
-                raise ValueError("Operador no permitido.")
+                raise ValueError("Operator not allowed.")
 
             left = evaluate(node.left)
             right = evaluate(node.right)
 
-            if isinstance(node.op, ast.Pow) and abs(right) > 100:
-                raise ValueError("Exponente demasiado grande.")
+            if isinstance(node.op, ast.Pow):
+                if abs(right) > 100:
+                    raise ValueError("Exponent is too large.")
 
+                if abs(left) > 1_000_000:
+                    raise ValueError("Power base is too large.")
             return operation(left, right)
 
         elif isinstance(node, ast.UnaryOp):
             operation = operators.get(type(node.op))
 
             if operation is None:
-                raise ValueError("Operador no permitido.")
+                raise ValueError("Unary operator not allowed.")
 
             return operation(evaluate(node.operand))
 
@@ -133,49 +161,45 @@ def calculate(expression: str):
             if node.id in constants:
                 return constants[node.id]
 
-            raise ValueError(f"Nombre no permitido: {node.id}")
+            raise ValueError(f"Name not allowed: {node.id}")
 
         elif isinstance(node, ast.Call):
             if not isinstance(node.func, ast.Name):
-                raise ValueError("Llamada a función no permitida.")
+                raise ValueError("Function call not allowed.")
 
             function = functions.get(node.func.id)
 
             if function is None:
-                raise ValueError(
-                    f"Función no permitida: {node.func.id}"
-                )
+                raise ValueError(f"Function not allowed: {node.func.id}")
 
             if node.keywords:
-                raise ValueError("No se permiten argumentos con nombre.")
+                raise ValueError("Keyword arguments are not allowed.")
 
             arguments = [evaluate(arg) for arg in node.args]
 
             return function(*arguments)
 
         else:
-            raise ValueError("Expresión no permitida.")
+            raise ValueError("Expression component not allowed.")
 
-    # Limitar la complejidad de la expresión
+    # Limit expression complexity.
     if sum(1 for _ in ast.walk(tree)) > 50:
-        raise ValueError("Expresión demasiado compleja.")
+        raise ValueError("Expression is too complex.")
 
     result = evaluate(tree)
 
     if not isinstance(result, (int, float)) or not math.isfinite(result):
-        raise ValueError("El resultado no es un número válido.")
+        raise ValueError("Result is not a valid finite number.")
 
-    return {
-        "expression": expression,
-        "result": result
-    }
+    return { "expression": expression, "result": result }
 
 # -- Weather
 def get_weather(city: str = "", forecast_days: int = 3):
     """
-    Consulta el tiempo actual y la previsión meteorológica de una ciudad.
-    city: Nombre de la ciudad y, si es posible, país.
-    forecast_days: Número de días de previsión, entre 1 y 7.
+    Retrieves current weather and forecast for a location.
+
+    city: City name and, if possible, country.
+    forecast_days: Number of forecast days, between 1 and 7.
     """
 
     if not isinstance(city, str) or not city.strip():
@@ -302,7 +326,7 @@ def get_weather(city: str = "", forecast_days: int = 3):
     longitude = place["longitude"]
 
 
-    # Consultar la previsión meteorológica
+    # Retrieve the weather forecast.
     weather_response = requests.get(
         "https://api.open-meteo.com/v1/forecast",
         params={
@@ -333,7 +357,7 @@ def get_weather(city: str = "", forecast_days: int = 3):
     weather_response.raise_for_status()
     data = weather_response.json()
 
-    # Preparar el tiempo actual
+    # Prepare current weather.
     current = data["current"]
 
     current_weather = {
@@ -349,7 +373,7 @@ def get_weather(city: str = "", forecast_days: int = 3):
         ),
     }
 
-    # Preparar la previsión diaria
+    # Prepare daily forecast.
     daily_data = data["daily"]
     daily_forecast = []
 
@@ -384,17 +408,7 @@ def get_weather(city: str = "", forecast_days: int = 3):
         "source": "Open-Meteo",
     }
 
-
 # -- Web Search
-SEARXNG_URL = "http://127.0.0.1:8080/search"
-
-MAX_SEARCH_QUERY_LENGTH = 300
-MAX_SEARCH_RESULTS = 5
-MAX_SEARCH_RESPONSE_BYTES = 1_000_000
-MAX_SEARCH_RESULT_TITLE_LENGTH = 300
-MAX_SEARCH_RESULT_CONTENT_LENGTH = 1_200
-
-
 def search_web(query: str, max_results: int = 5):
     """
     Searches the web through the local SearXNG instance.
@@ -418,9 +432,7 @@ def search_web(query: str, max_results: int = 5):
         raise ValueError("max_results must be an integer.")
 
     if not 1 <= max_results <= MAX_SEARCH_RESULTS:
-        raise ValueError(
-            f"max_results must be between 1 and {MAX_SEARCH_RESULTS}."
-        )
+        raise ValueError(f"max_results must be between 1 and {MAX_SEARCH_RESULTS}.")
 
     logger.info("Performing web search through local SearXNG.")
 
@@ -446,42 +458,25 @@ def search_web(query: str, max_results: int = 5):
             ) as response:
 
                 if response.status_code != 200:
-                    logger.warning(
-                        "SearXNG returned HTTP status %s.",
-                        response.status_code
-                    )
-                    return {
-                        "status": "error",
-                        "message": "The search service returned an unexpected response."
-                    }
+                    logger.warning( "SearXNG returned HTTP status %s.", response.status_code )
+                    return {"status": "error", "message": "The search service returned an unexpected response." }
 
                 content_type = response.headers.get(
                     "Content-Type", ""
                 ).lower()
 
                 if "application/json" not in content_type:
-                    logger.warning(
-                        "SearXNG returned an unexpected content type."
-                    )
-                    return {
-                        "status": "error",
-                        "message": "The search service did not return JSON."
-                    }
+                    logger.warning("SearXNG returned an unexpected content type." )
+                    return { "status": "error", "message": "The search service did not return JSON." }
 
                 content_length = response.headers.get("Content-Length")
 
                 if content_length:
                     try:
                         if int(content_length) > MAX_SEARCH_RESPONSE_BYTES:
-                            return {
-                                "status": "error",
-                                "message": "The search response was too large."
-                            }
+                            return { "status": "error", "message": "The search response was too large." }
                     except ValueError:
-                        return {
-                            "status": "error",
-                            "message": "The search response had an invalid size."
-                        }
+                        return { "status": "error", "message": "The search response had an invalid size." }
 
                 # Read the response with a strict size limit.
                 response_body = bytearray()
@@ -493,13 +488,8 @@ def search_web(query: str, max_results: int = 5):
                     response_body.extend(chunk)
 
                     if len(response_body) > MAX_SEARCH_RESPONSE_BYTES:
-                        logger.warning(
-                            "SearXNG response exceeded the size limit."
-                        )
-                        return {
-                            "status": "error",
-                            "message": "The search response was too large."
-                        }
+                        logger.warning( "SearXNG response exceeded the size limit." )
+                        return { "status": "error", "message": "The search response was too large." }
 
                 data = json.loads(response_body)
 
@@ -527,7 +517,7 @@ def search_web(query: str, max_results: int = 5):
             if not isinstance(content, str):
                 content = ""
 
-            if not _is_safe_search_result_url(url):
+            if not is_safe_search_result_url(url):
                 continue
 
             safe_results.append({
@@ -570,6 +560,261 @@ def search_web(query: str, max_results: int = 5):
         logger.exception("Invalid response received from SearXNG.")
         return {"status": "error", "message": "The search service returned invalid data."}
 
+# -- File system
+def ls(path: str = ".") -> dict:
+    """
+    Lists files and directories in a specified directory.
+
+    This function only lists directory entries.
+    It does not read, modify, delete, or execute files.
+    """
+
+    if not isinstance(path, str):
+        return {"status": "error", "message": "Path must be a string."}
+
+    path = path.strip()
+
+    if not path:
+        return {"status": "error", "message": "A directory path must be specified."}
+
+    
+    try:
+        directory = validate_directory_path(path)
+
+        directories = []
+        files = []
+        skipped = 0
+        truncated = False
+
+        with os.scandir(directory) as entries:
+            for entry in entries:
+
+                if len(directories) + len(files) >= MAX_DIRECTORY_ENTRIES:
+                    truncated = True
+                    break
+
+                name = entry.name
+                lower_name = name.lower()
+
+                # Skip restricted directory names.
+                if is_blocked_directory_name(name):
+                    skipped += 1
+                    continue
+
+                try:
+                    entry_stat = entry.stat(follow_symlinks=False)
+
+                    # Reject links, reparse points, hidden entries,
+                    # and system entries.
+                    if is_restricted_filesystem_entry(entry_stat):
+                        skipped += 1
+                        continue
+
+                    if is_hidden_or_system_entry(entry_stat):
+                        skipped += 1
+                        continue
+
+                except OSError:
+                    skipped += 1
+                    continue
+
+                # Handle directories.
+                if entry.is_dir(follow_symlinks=False):
+                    if lower_name.startswith("."):
+                        skipped += 1
+                        continue
+
+                    directories.append(name)
+                    continue
+
+                # Handle regular files.
+                if entry.is_file(follow_symlinks=False):
+                    if is_blocked_file_name(name):
+                        skipped += 1
+                        continue
+
+                    files.append(name)
+                    continue
+
+                skipped += 1
+
+        directories.sort(key=str.lower)
+        files.sort(key=str.lower)
+
+        logger.info(
+            "Filesystem listing completed | Directories: %d | Files: %d | Skipped: %d",
+            len(directories),
+            len(files),
+            skipped
+        )
+
+        return {
+            "status": "success",
+            "directory": str(directory),
+            "directories": directories,
+            "files": files,
+            "directory_count": len(directories),
+            "file_count": len(files),
+            "skipped_entries": skipped,
+            "max_entries": MAX_DIRECTORY_ENTRIES,
+            "truncated": truncated
+        }
+
+    except FileNotFoundError:
+        return {"status": "error", "message": "The specified directory does not exist."}
+
+    except NotADirectoryError:
+        return {"status": "error", "message": "The specified path is not a directory."}
+
+    except PermissionError:
+        return {"status": "error", "message": "Access to the specified directory is restricted."}
+
+    except OSError:
+        logger.exception("Could not list the specified directory.")
+
+        return {"status": "error", "message": "Could not access the specified directory."}
+
+# -- Read files
+def read_file(path: str) -> dict:
+    """
+    Reads the contents of an allowed file without modifying it.
+
+    Only Python and Markdown files are supported.
+    Restricted directories, hidden files, symbolic links,
+    and Windows reparse points are rejected.
+    """
+
+    if not isinstance(path, str):
+        return {"status": "error", "message": "Path must be a string."}
+
+    path = path.strip()
+
+    if not path:
+        return {"status": "error", "message": "A file path must be specified."}
+
+    if len(path) > MAX_READ_FILE_PATH_LENGTH:
+        return {"status": "error", "message": "File path is too long."}
+
+    file_path = Path(path).expanduser()
+
+    if not file_path.is_absolute():
+        file_path = Path.cwd() / file_path
+
+    file_path = Path(os.path.abspath(file_path))
+
+    # Check the file extension.
+    if file_path.suffix.lower() not in ALLOWED_READ_FILE_EXTENSIONS:
+        return {"status": "error", "message": "Only .py and .md files can be read."}
+
+    # Reject restricted filenames.
+    if is_blocked_file_name(file_path.name):
+        return {"status": "error", "message": "Access to this file is restricted."}
+
+    file_descriptor = None
+
+    try:
+        # Validate the parent directory using the same rules as ls().
+        validate_directory_path(str(file_path.parent))
+
+        # Inspect the file without following symbolic links.
+        file_stat = os.lstat(file_path)
+
+        if is_restricted_filesystem_entry(file_stat):
+            return {"status": "error", "message": "Symbolic links and reparse points are not allowed."}
+
+        if is_hidden_or_system_entry(file_stat):
+            return {"status": "error", "message": "Hidden and system files cannot be read."}
+
+        if not stat.S_ISREG(file_stat.st_mode):
+            return {"status": "error", "message": "The specified path is not a regular file."}
+
+        if file_stat.st_size > MAX_READ_FILE_SIZE:
+            return {"status": "error", "message": "File exceeds the maximum allowed size of 1 MB."}
+
+        # Open the file in read-only mode.
+        flags = os.O_RDONLY
+
+        if hasattr(os, "O_BINARY"):
+            flags |= os.O_BINARY
+
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+
+        file_descriptor = os.open(file_path, flags)
+
+        opened_stat = os.fstat(file_descriptor)
+
+        # Verify that the opened file is still a regular file.
+        if not stat.S_ISREG(opened_stat.st_mode):
+            return {"status": "error", "message": "The opened path is not a regular file."}
+
+        if is_restricted_filesystem_entry(opened_stat):
+            return {"status": "error", "message": "The opened file is restricted."}
+
+        if is_hidden_or_system_entry(opened_stat):
+            return {"status": "error", "message": "Hidden and system files cannot be read."}
+
+        # Detect changes between the initial inspection and opening.
+        if ( file_stat.st_ino and opened_stat.st_ino and (file_stat.st_dev != opened_stat.st_dev or file_stat.st_ino != opened_stat.st_ino)):
+            return {"status": "error", "message": "The file changed during validation."}
+
+        if opened_stat.st_size > MAX_READ_FILE_SIZE:
+            return {"status": "error", "message": "File exceeds the maximum allowed size of 1 MB."}
+
+        # Read at most 1 MB plus one byte to detect unexpected growth.
+        with os.fdopen(file_descriptor, "rb") as file:
+            file_descriptor = None
+            raw_content = file.read(MAX_READ_FILE_SIZE + 1)
+
+        if len(raw_content) > MAX_READ_FILE_SIZE:
+            return {"status": "error", "message": "File exceeds the maximum allowed size of 1 MB."}
+
+        # Decode UTF-8 text.
+        try:
+            content = raw_content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return {"status": "error", "message": "The file is not valid UTF-8 text."}
+
+        total_chars = len(content)
+        truncated = total_chars > MAX_READ_FILE_CHARS
+
+        if truncated:
+            content = content[:MAX_READ_FILE_CHARS]
+
+        logger.info(
+            "File read completed | Extension: %s | Characters: %d | Truncated: %s",
+            file_path.suffix.lower(),
+            len(content),
+            truncated
+        )
+
+        return {
+            "status": "success",
+            "file": str(file_path),
+            "content": content,
+            "characters_returned": len(content),
+            "total_characters": total_chars,
+            "truncated": truncated,
+            "max_characters": MAX_READ_FILE_CHARS
+        }
+
+    except FileNotFoundError:
+        return {"status": "error", "message": "The specified file does not exist."}
+
+    except PermissionError:
+        return {"status": "error", "message": "Access to the specified file is restricted."}
+
+    except IsADirectoryError:
+        return {"status": "error", "message": "The specified path is a directory, not a file."}
+
+    except (ValueError, OSError):
+        logger.exception("Could not read the specified file.")
+        return {"status": "error", "message": "Could not access or read the specified file."}
+
+    finally:
+        if file_descriptor is not None:
+            os.close(file_descriptor)
+
 
 # ------------ Central registry of available tools -------------
 TOOL_REGISTRY = {
@@ -577,6 +822,8 @@ TOOL_REGISTRY = {
     "calculate": calculate,
     "get_weather": get_weather,
     "search_web": search_web,
+    "ls": ls,
+    "read_file": read_file,
 }
 
 def get_available_tools():
@@ -653,7 +900,7 @@ def execute_tool(tool_call, execution_context):
         execution_context["seen"].add(call_signature)
         execution_context["count"] += 1
 
-        logger.info("Executing tool: %s", tool_name)
+        logger.info("Executing tool: %s  --- Arguments: %s", tool_name, tool_call.function.arguments)
 
         result = tool_function(**arguments)
 
